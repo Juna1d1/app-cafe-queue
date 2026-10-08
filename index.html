@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Antrian cafe</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=Instrument+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<main class="landing">
+  <h1 id="name">Antrian cafe</h1>
+  <p>Pilih layar sesuai perangkat yang dipakai.</p>
+  <div class="cards">
+    <a href="kasir.html"><strong>Kasir</strong><span>Catat pesanan dan berikan nomor antrian ke pelanggan.</span></a>
+    <a href="dapur.html"><strong>Dapur</strong><span>Lihat pesanan masuk, mulai buat, dan tandai siap.</span></a>
+    <a href="layar.html"><strong>Layar antrian</strong><span>Tampilkan di TV agar pelanggan tahu kapan pesanannya siap.</span></a>
+  </div>
+</main>
+<script src="assets/config.js"></script>
+<script>document.getElementById('name').textContent = (window.CAFE_CONFIG||{}).CAFE_NAME || 'Antrian cafe';</script>
+</body>
+</html>

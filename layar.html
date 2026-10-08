@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Antrian</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=Instrument+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body class="display">
+<main class="screen">
+  <section class="ready-pane" aria-live="polite">
+    <h1 class="pane-title" id="ready-title">Siap diambil</h1>
+    <div id="ready"></div>
+  </section>
+  <section class="making-pane" aria-live="polite">
+    <div><h2 class="pane-title">Sedang dibuat</h2><div class="nums" id="preparing"></div></div>
+    <div><h2 class="pane-title" style="color:#c9d0ff">Antri</h2><div class="nums waiting" id="waiting"></div></div>
+  </section>
+</main>
+<div class="tools">
+  <button class="btn" id="sound">Aktifkan suara</button>
+  <button class="btn" id="fs">Layar penuh</button>
+</div>
+<div class="offline" id="offline" hidden>Terputus dari server, mencoba lagi…</div>
+<script src="assets/config.js"></script>
+<script src="assets/common.js"></script>
+<script>
+const { api, esc } = Cafe;
+const $ = (id) => document.getElementById(id);
+$('ready-title').textContent = 'Siap diambil';
+
+let readyIds = null;
+let latestId = null;
+
+function nums(list, emptyText, total) {
+  if (!list.length) return `<p class="hint">${emptyText}</p>`;
+  const more = (total || list.length) - list.length;
+  return list.map((o) => `<span class="num">${o.queue_number}</span>`).join('')
+    + (more > 0 ? `<p class="hint" style="align-self:center">+${more} lagi</p>` : '');
+}
+
+function render(orders, counts = {}) {
+  const ready = orders.filter((o) => o.status === 'ready')
+    .sort((a, b) => (b.updated_at.localeCompare(a.updated_at)) || (b.queue_number - a.queue_number));
+  const preparing = orders.filter((o) => o.status === 'preparing');
+  const waiting = orders.filter((o) => o.status === 'waiting');
+
+  const ids = new Set(ready.map((o) => o.id));
+  const fresh = readyIds && ready.length && !readyIds.has(ready[0].id);
+  if (fresh) Cafe.sound.chime();
+  readyIds = ids;
+
+  if (!ready.length) {
+    $('ready').innerHTML = '<p class="empty-ready">Belum ada pesanan yang siap. Mohon ditunggu ya.</p>';
+  } else {
+    const [first, ...rest] = ready;
+    const heroKey = first.id;
+    const animate = fresh && heroKey !== latestId;
+    latestId = heroKey;
+    $('ready').innerHTML = `
+      <div class="hero${animate ? ' fresh' : ''}">
+        <span class="num">${first.queue_number}</span>
+        ${first.customer_name ? `<span class="name">${esc(first.customer_name)}</span>` : ''}
+      </div>
+      ${rest.length ? `<div class="others">${rest.map((o) => `<span class="num">${o.queue_number}</span>`).join('')}</div>` : ''}`;
+  }
+  $('preparing').innerHTML = nums(preparing, 'Belum ada.', counts.preparing);
+  $('waiting').innerHTML = nums(waiting, 'Kosong.', counts.waiting);
+}
+
+async function tick() {
+  try {
+    const { orders, counts } = await api('/api/queue');
+    $('offline').hidden = true;
+    render(orders, counts);
+  } catch { $('offline').hidden = false; }
+}
+
+$('sound').addEventListener('click', () => { if (Cafe.sound.enable()) { $('sound').hidden = true; Cafe.sound.chime(); } });
+$('fs').addEventListener('click', () => {
+  if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.();
+});
+
+tick();
+setInterval(tick, 3000);
+</script>
+</body>
+</html>

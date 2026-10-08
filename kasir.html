@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kasir</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=Instrument+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div id="top"></div>
+<main class="pos">
+  <section aria-label="Menu">
+    <div class="chips" id="chips" role="group" aria-label="Kategori"></div>
+    <div class="menu-grid" id="menu"></div>
+  </section>
+  <aside class="order" aria-label="Pesanan saat ini">
+    <h2>Pesanan baru</h2>
+    <div>
+      <label for="cust">Nama pelanggan (boleh kosong)</label>
+      <input id="cust" type="text" maxlength="40" autocomplete="off">
+    </div>
+    <div class="lines" id="lines" aria-live="polite"></div>
+    <div class="total"><span>Total</span><span class="num" id="total">Rp0</span></div>
+    <button class="btn big" id="submit" disabled>Buat pesanan</button>
+    <button class="btn ghost" id="clear" disabled>Kosongkan</button>
+  </aside>
+</main>
+<script src="assets/config.js"></script>
+<script src="assets/common.js"></script>
+<script>
+const { api, rupiah, esc, toast } = Cafe;
+document.getElementById('top').innerHTML = Cafe.header('kasir');
+
+let menu = [];
+let category = 'Semua';
+const cart = new Map(); // menu_id -> qty
+
+const $ = (id) => document.getElementById(id);
+
+async function loadMenu() {
+  try { menu = (await api('/api/menu')).menu; } catch (e) { toast(e.message, true); }
+  render();
+}
+
+function renderChips() {
+  const cats = ['Semua', ...new Set(menu.map((m) => m.category))];
+  $('chips').innerHTML = cats.map((c) =>
+    `<button class="chip" aria-pressed="${c === category}" data-cat="${esc(c)}">${esc(c)}</button>`).join('');
+}
+
+function renderMenu() {
+  const list = menu.filter((m) => category === 'Semua' || m.category === category);
+  $('menu').innerHTML = list.map((m) => {
+    const q = cart.get(m.id) || 0;
+    return `<button class="item" data-id="${m.id}" ${m.is_available ? '' : 'disabled'}>
+      ${q ? `<span class="badge">${q}</span>` : ''}
+      <strong>${esc(m.name)}</strong>
+      <span class="price">${m.is_available ? rupiah(m.price) : 'Habis'}</span>
+    </button>`;
+  }).join('');
+}
+
+function renderCart() {
+  const rows = [...cart.entries()].map(([id, qty]) => ({ m: menu.find((x) => x.id === id), qty })).filter((r) => r.m);
+  $('lines').innerHTML = rows.length
+    ? rows.map(({ m, qty }) => `<div class="line">
+        <span class="nm">${esc(m.name)}</span>
+        <div class="stepper">
+          <button data-dec="${m.id}" aria-label="Kurangi ${esc(m.name)}">−</button>
+          <span>${qty}</span>
+          <button data-inc="${m.id}" aria-label="Tambah ${esc(m.name)}">+</button>
+        </div>
+        <span class="sub">${rupiah(m.price * qty)}</span>
+      </div>`).join('')
+    : '<p class="empty">Belum ada item. Ketuk menu di sebelah kiri untuk menambah.</p>';
+  const total = rows.reduce((s, r) => s + r.m.price * r.qty, 0);
+  $('total').textContent = rupiah(total);
+  $('submit').disabled = !rows.length;
+  $('clear').disabled = !rows.length;
+}
+
+function render() { renderChips(); renderMenu(); renderCart(); }
+
+function change(id, delta) {
+  const next = (cart.get(id) || 0) + delta;
+  if (next <= 0) cart.delete(id); else cart.set(id, Math.min(next, 50));
+  renderMenu(); renderCart();
+}
+
+$('chips').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-cat]'); if (!b) return;
+  category = b.dataset.cat; renderChips(); renderMenu();
+});
+$('menu').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-id]'); if (b) change(Number(b.dataset.id), 1);
+});
+$('lines').addEventListener('click', (e) => {
+  const d = e.target.closest('[data-dec]'), i = e.target.closest('[data-inc]');
+  if (d) change(Number(d.dataset.dec), -1);
+  if (i) change(Number(i.dataset.inc), 1);
+});
+$('clear').addEventListener('click', () => { cart.clear(); render(); });
+
+function showResult(order) {
+  const wrap = document.createElement('div');
+  wrap.className = 'overlay';
+  wrap.innerHTML = `<div class="dialog result" role="dialog" aria-modal="true" aria-label="Pesanan dibuat">
+      <p>Nomor antrian</p>
+      <div class="num">${order.queue_number}</div>
+      <p>${order.customer_name ? esc(order.customer_name) + ' · ' : ''}${rupiah(order.total)}</p>
+      <button class="btn big" id="done">Pesanan berikutnya</button>
+    </div>`;
+  document.body.appendChild(wrap);
+  const done = wrap.querySelector('#done');
+  done.focus();
+  done.addEventListener('click', () => wrap.remove());
+}
+
+$('submit').addEventListener('click', async () => {
+  const btn = $('submit'); btn.disabled = true;
+  try {
+    const { order } = await api('/api/orders', {
+      method: 'POST', staff: true,
+      body: { customer_name: $('cust').value, items: [...cart.entries()].map(([menu_id, qty]) => ({ menu_id, qty })) },
+    });
+    cart.clear(); $('cust').value = '';
+    render(); showResult(order);
+  } catch (e) {
+    if (e.status === 401) { Cafe.store.clear(); await Cafe.requireStaff(); }
+    else { toast(e.message, true); if (e.status === 409) loadMenu(); }
+    btn.disabled = !cart.size;
+  }
+});
+
+(async () => { await Cafe.requireStaff(); loadMenu(); })();
+</script>
+</body>
+</html>

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dapur</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=Instrument+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div id="top"></div>
+<main class="board" aria-live="polite">
+  <section class="col waiting"><h2>Antri <span class="count" id="c-waiting">0</span></h2><div id="l-waiting"></div></section>
+  <section class="col preparing"><h2>Sedang dibuat <span class="count" id="c-preparing">0</span></h2><div id="l-preparing"></div></section>
+  <section class="col ready"><h2>Siap diambil <span class="count" id="c-ready">0</span></h2><div id="l-ready"></div></section>
+</main>
+<section class="stock">
+  <details>
+    <summary>Tandai menu habis</summary>
+    <div class="stock-list" id="stock"></div>
+  </details>
+  <button class="btn ghost sm" id="sound" style="margin-top:12px">Aktifkan bunyi pesanan baru</button>
+</section>
+<script src="assets/config.js"></script>
+<script src="assets/common.js"></script>
+<script>
+const { api, esc, toast } = Cafe;
+const $ = (id) => document.getElementById(id);
+$('top').innerHTML = Cafe.header('dapur');
+
+const NEXT = {
+  waiting:   { label: 'Mulai buat',        to: 'preparing', cls: 'butter' },
+  preparing: { label: 'Tandai siap',       to: 'ready',     cls: 'mint' },
+  ready:     { label: 'Sudah diambil',     to: 'done',      cls: '' },
+};
+const EMPTY = {
+  waiting: 'Belum ada pesanan masuk.',
+  preparing: 'Tidak ada yang sedang dibuat.',
+  ready: 'Belum ada yang siap diambil.',
+};
+
+let seen = null; // id pesanan yang sudah terlihat, untuk bunyi pesanan baru
+
+function ticket(o) {
+  const n = NEXT[o.status];
+  return `<article class="ticket">
+    <div class="head"><span class="num">${o.queue_number}</span><span class="who">${esc(o.customer_name || '')}</span></div>
+    <ul>${o.items.map((i) => `<li><b>${i.qty}×</b>${esc(i.name)}</li>`).join('')}</ul>
+    ${o.note ? `<p class="note">${esc(o.note)}</p>` : ''}
+    <div class="actions">
+      <button class="btn ${n.cls}" data-id="${o.id}" data-to="${n.to}">${n.label}</button>
+      ${o.status !== 'ready' ? `<button class="btn warn sm" data-id="${o.id}" data-to="cancelled" aria-label="Batalkan pesanan ${o.queue_number}">Batalkan</button>` : ''}
+    </div>
+  </article>`;
+}
+
+function renderBoard(orders) {
+  for (const s of ['waiting', 'preparing', 'ready']) {
+    const list = orders.filter((o) => o.status === s);
+    $('c-' + s).textContent = list.length;
+    $('l-' + s).innerHTML = list.length ? list.map(ticket).join('') : `<p class="empty-col">${EMPTY[s]}</p>`;
+  }
+}
+
+async function refresh() {
+  try {
+    const { orders } = await api('/api/orders', { staff: true });
+    const ids = new Set(orders.map((o) => o.id));
+    if (seen && [...ids].some((id) => !seen.has(id))) Cafe.sound.chime([660, 880]);
+    seen = ids;
+    renderBoard(orders);
+  } catch (e) {
+    if (e.status === 401) { Cafe.store.clear(); await Cafe.requireStaff(); }
+  }
+}
+
+document.querySelector('.board').addEventListener('click', async (e) => {
+  const b = e.target.closest('button[data-to]'); if (!b) return;
+  b.disabled = true;
+  try {
+    await api(`/api/orders/${b.dataset.id}/status`, { method: 'PATCH', staff: true, body: { status: b.dataset.to } });
+    refresh();
+  } catch (err) { toast(err.message, true); b.disabled = false; }
+});
+
+async function loadStock() {
+  try {
+    const { menu } = await api('/api/menu');
+    $('stock').innerHTML = menu.map((m) => `<div class="stock-row ${m.is_available ? '' : 'off'}">
+      <span>${esc(m.name)}</span>
+      <button class="btn sm ${m.is_available ? 'ghost' : ''}" data-menu="${m.id}" data-avail="${m.is_available ? 0 : 1}">${m.is_available ? 'Tandai habis' : 'Sediakan lagi'}</button>
+    </div>`).join('');
+  } catch (e) { toast(e.message, true); }
+}
+$('stock').addEventListener('click', async (e) => {
+  const b = e.target.closest('button[data-menu]'); if (!b) return;
+  try {
+    await api(`/api/menu/${b.dataset.menu}`, { method: 'PATCH', staff: true, body: { is_available: b.dataset.avail === '1' } });
+    loadStock();
+  } catch (err) { toast(err.message, true); }
+});
+
+$('sound').addEventListener('click', () => {
+  if (Cafe.sound.enable()) { $('sound').hidden = true; Cafe.sound.chime([660, 880]); }
+});
+
+(async () => {
+  await Cafe.requireStaff();
+  refresh(); loadStock();
+  setInterval(refresh, 4000);
+})();
+</script>
+</body>
+</html>
